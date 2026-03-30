@@ -89,155 +89,154 @@ def get_forecast(city):
 # DASHBOARD
 # ════════════════════════════════════════════════════════════════
 
-placeholder = st.empty()
+st.title("📊 Live Data Dashboard")
+st.caption(f"Last updated: {datetime.now().strftime('%H:%M:%S  %d %b %Y')}  |  Next refresh in 5 min")
 
-while True:
-    with placeholder.container():
+tab1, tab2 = st.tabs(["📈  Stocks", "🌦  Weather"])
 
-        st.title("📊 Live Data Dashboard")
-        st.caption(f"Last updated: {datetime.now().strftime('%H:%M:%S  %d %b %Y')}  |  Next refresh in 5 min")
+# ════════════════════════════════════════════════════════════════
+# TAB 1 - STOCKS
+# ════════════════════════════════════════════════════════════════
+with tab1:
 
-        tab1, tab2 = st.tabs(["📈  Stocks", "🌦  Weather"])
+    cols = st.columns(len(STOCKS))
+    histories = {}
+    for i, sym in enumerate(STOCKS):
+        price, change, pct = get_latest(sym)
+        cols[i].metric(
+            label=sym,
+            value=f"${price:.2f}",
+            delta=f"{pct:.2f}%"
+        )
+        histories[sym] = get_stock_data(sym)
 
-        # ════════════════════════════════════════════════════════
-        # TAB 1 - STOCKS
-        # ════════════════════════════════════════════════════════
-        with tab1:
+    # 7-day line chart
+    fig = go.Figure()
+    for sym, hist in histories.items():
+        fig.add_trace(go.Scatter(
+            x=hist["Date"],
+            y=hist["Close"],
+            mode="lines+markers",
+            name=sym
+        ))
+    fig.update_layout(
+        title="7-Day Closing Prices",
+        xaxis_title="Date",
+        yaxis_title="Price (USD)",
+        hovermode="x unified"
+    )
+    st.plotly_chart(fig, use_container_width=True, key="stock_line")
 
-            cols = st.columns(len(STOCKS))
-            histories = {}
-            for i, sym in enumerate(STOCKS):
-                price, change, pct = get_latest(sym)
-                cols[i].metric(
-                    label=sym,
-                    value=f"${price:.2f}",
-                    delta=f"{pct:.2f}%"
-                )
-                histories[sym] = get_stock_data(sym)
+    # Volatility bar chart
+    vol_data = []
+    for sym, hist in histories.items():
+        close_data = hist["Close"]
+        if hasattr(close_data, "columns"):
+            close_data = close_data.iloc[:, 0]
+        daily_range = ((hist["High"] - hist["Low"]) / hist["Close"] * 100).mean()
+        vol_data.append({"symbol": sym, "avg_range_%": round(float(daily_range), 2)})
 
-            # 7-day line chart
-            fig = go.Figure()
-            for sym, hist in histories.items():
-                fig.add_trace(go.Scatter(
-                    x=hist["Date"],
-                    y=hist["Close"],
-                    mode="lines+markers",
-                    name=sym
-                ))
-            fig.update_layout(
-                title="7-Day Closing Prices",
-                xaxis_title="Date",
-                yaxis_title="Price (USD)",
-                hovermode="x unified"
-            )
-            st.plotly_chart(fig, use_container_width=True)
+    df_vol = pd.DataFrame(vol_data)
+    fig_vol = px.bar(
+        df_vol, x="symbol", y="avg_range_%",
+        title="Average Daily Volatility - High/Low Spread (%)",
+        color="avg_range_%",
+        color_continuous_scale="Reds"
+    )
+    st.plotly_chart(fig_vol, use_container_width=True, key="stock_vol")
 
-            # Volatility bar chart
-            vol_data = []
-            for sym, hist in histories.items():
-                close_data = hist["Close"]
-                if hasattr(close_data, "columns"):
-                    close_data = close_data.iloc[:, 0]
-                daily_range = ((hist["High"] - hist["Low"]) / hist["Close"] * 100).mean()
-                vol_data.append({"symbol": sym, "avg_range_%": round(float(daily_range), 2)})
+    # Volatility alerts
+    st.subheader("Volatility Alerts")
+    any_alert = False
+    for sym, hist in histories.items():
+        if len(hist) >= 2:
+            close_data = hist["Close"]
+            if hasattr(close_data, "columns"):
+                close_data = close_data.iloc[:, 0]
+            pct_series = close_data.pct_change()
+            chg = float(pct_series.iloc[-1]) * 100
+            if chg > 2:
+                st.warning(f"{sym}: {chg:.2f}% move - above 2% threshold")
+                any_alert = True
+    if not any_alert:
+        st.success("All stocks within normal range.")
 
-            df_vol = pd.DataFrame(vol_data)
-            fig_vol = px.bar(
-                df_vol, x="symbol", y="avg_range_%",
-                title="Average Daily Volatility - High/Low Spread (%)",
-                color="avg_range_%",
-                color_continuous_scale="Reds"
-            )
-            st.plotly_chart(fig_vol, use_container_width=True)
+# ════════════════════════════════════════════════════════════════
+# TAB 2 - WEATHER
+# ════════════════════════════════════════════════════════════════
+with tab2:
 
-            # Volatility alerts
-            st.subheader("Volatility Alerts")
-            any_alert = False
-            for sym, hist in histories.items():
-                if len(hist) >= 2:
-                    close_data = hist["Close"]
-                    if hasattr(close_data, "columns"):
-                        close_data = close_data.iloc[:, 0]
-                    pct_series = close_data.pct_change()
-                    chg = float(pct_series.iloc[-1]) * 100
-                    if chg > 2:
-                        st.warning(f"{sym}: {chg:.2f}% move - above 2% threshold")
-                        any_alert = True
-            if not any_alert:
-                st.success("All stocks within normal range.")
+    weather_all = [get_weather(c) for c in CITIES]
 
-        # ════════════════════════════════════════════════════════
-        # TAB 2 - WEATHER
-        # ════════════════════════════════════════════════════════
-        with tab2:
+    # Metric cards
+    w_cols = st.columns(len(CITIES))
+    for i, w in enumerate(weather_all):
+        w_cols[i].metric(w["city"], f"{w['temp']}C", w["cond"])
+        w_cols[i].caption(
+            f"Feels {w['feels']}C  |  Humidity {w['humidity']}%  |  Wind {w['wind']} km/h"
+        )
 
-            weather_all = [get_weather(c) for c in CITIES]
+    col_left, col_right = st.columns(2)
 
-            # Metric cards
-            w_cols = st.columns(len(CITIES))
-            for i, w in enumerate(weather_all):
-                w_cols[i].metric(w["city"], f"{w['temp']}C", w["cond"])
-                w_cols[i].caption(
-                    f"Feels {w['feels']}C  |  Humidity {w['humidity']}%  |  Wind {w['wind']} km/h"
-                )
+    # Humidity chart
+    with col_left:
+        df_w = pd.DataFrame(weather_all)
+        fig_hum = px.bar(
+            df_w, x="city", y="humidity",
+            title="Humidity by City (%)",
+            color="humidity",
+            color_continuous_scale="Blues"
+        )
+        st.plotly_chart(fig_hum, use_container_width=True, key="weather_hum")
 
-            col_left, col_right = st.columns(2)
+    # Temperature chart
+    with col_right:
+        fig_temp = px.bar(
+            df_w, x="city", y="temp",
+            title="Temperature by City (C)",
+            color="temp",
+            color_continuous_scale="Oranges"
+        )
+        st.plotly_chart(fig_temp, use_container_width=True, key="weather_temp")
 
-            # Humidity chart
-            with col_left:
-                df_w = pd.DataFrame(weather_all)
-                fig_hum = px.bar(
-                    df_w, x="city", y="humidity",
-                    title="Humidity by City (%)",
-                    color="humidity",
-                    color_continuous_scale="Blues"
-                )
-                st.plotly_chart(fig_hum, use_container_width=True)
+    # Forecast chart
+    st.subheader(f"Short-term Forecast - {CITIES[0]}")
+    fc = get_forecast(CITIES[0])
+    if not fc.empty:
+        fig_fc = go.Figure()
+        fig_fc.add_trace(go.Scatter(
+            x=fc["time"], y=fc["temp"],
+            mode="lines+markers", name="Temp C",
+            line=dict(color="tomato")
+        ))
+        fig_fc.add_trace(go.Scatter(
+            x=fc["time"], y=fc["humidity"],
+            mode="lines+markers", name="Humidity %",
+            line=dict(color="steelblue"), yaxis="y2"
+        ))
+        fig_fc.update_layout(
+            title=f"Temperature & Humidity Forecast - {CITIES[0]}",
+            yaxis=dict(title="Temp (C)"),
+            yaxis2=dict(title="Humidity (%)", overlaying="y", side="right"),
+            hovermode="x unified"
+        )
+        st.plotly_chart(fig_fc, use_container_width=True, key="weather_forecast")
 
-            # Temperature chart
-            with col_right:
-                fig_temp = px.bar(
-                    df_w, x="city", y="temp",
-                    title="Temperature by City (C)",
-                    color="temp",
-                    color_continuous_scale="Oranges"
-                )
-                st.plotly_chart(fig_temp, use_container_width=True)
+    # Weather alerts
+    st.subheader("Weather Alerts")
+    any_w = False
+    for w in weather_all:
+        if w["temp"] > 30:
+            st.error(f"{w['city']}: {w['temp']}C - extreme heat")
+            any_w = True
+        if w["humidity"] > 80:
+            st.warning(f"{w['city']}: {w['humidity']}% humidity - high moisture")
+            any_w = True
+    if not any_w:
+        st.success("No weather alerts.")
 
-            # Forecast chart
-            st.subheader(f"Short-term Forecast - {CITIES[0]}")
-            fc = get_forecast(CITIES[0])
-            if not fc.empty:
-                fig_fc = go.Figure()
-                fig_fc.add_trace(go.Scatter(
-                    x=fc["time"], y=fc["temp"],
-                    mode="lines+markers", name="Temp C",
-                    line=dict(color="tomato")
-                ))
-                fig_fc.add_trace(go.Scatter(
-                    x=fc["time"], y=fc["humidity"],
-                    mode="lines+markers", name="Humidity %",
-                    line=dict(color="steelblue"), yaxis="y2"
-                ))
-                fig_fc.update_layout(
-                    title=f"Temperature & Humidity Forecast - {CITIES[0]}",
-                    yaxis=dict(title="Temp (C)"),
-                    yaxis2=dict(title="Humidity (%)", overlaying="y", side="right"),
-                    hovermode="x unified"
-                )
-                st.plotly_chart(fig_fc, use_container_width=True)
-
-            # Weather alerts
-            st.subheader("Weather Alerts")
-            any_w = False
-            for w in weather_all:
-                if w["temp"] > 30:
-                    st.error(f"{w['city']}: {w['temp']}C - extreme heat")
-                    any_w = True
-                if w["humidity"] > 80:
-                    st.warning(f"{w['city']}: {w['humidity']}% humidity - high moisture")
-                    any_w = True
-            if not any_w:
-                st.success("No weather alerts.")
-
-    time.sleep(REFRESH)
+# ════════════════════════════════════════════════════════════════
+# AUTO REFRESH
+# ════════════════════════════════════════════════════════════════
+time.sleep(REFRESH)
+st.rerun()
